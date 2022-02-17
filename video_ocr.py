@@ -2,51 +2,94 @@ import click
 import cv2 as cv
 
 import scipy.fft
+from contextlib import contextmanager
 import numpy as np
+from itertools import tee
+import tesserocr
+from PIL import Image
+from multiprocessing.pool import ThreadPool
+import multiprocessing
 
 def phash_faster(image, hash_size=8, highfreq_factor=4):
     if hash_size < 2:
         raise ValueError("Hash size must be greater than or equal to 2")
 
     img_size = hash_size * highfreq_factor
-    image = cv.cvtColor(image, cv.COLOR_RGB2GRAY)
     image = cv.resize(image, (img_size, img_size), interpolation=cv.INTER_LINEAR)
     dct = scipy.fft.dct(scipy.fft.dct(image, axis=0), axis=1)
     dctlowfreq = dct[:hash_size, :hash_size]
     med = np.median(dctlowfreq)
     diff = dctlowfreq > med
     return diff
+
+class Frame:
+    def __init__(self, frame_number, image, millis):
+        self.frame_number = frame_number
+        self.image = image
+        self. millis = millis
+
+
+
+@contextmanager
+def open_cv_video(filepath):
+    cap = cv.VideoCapture(filepath)
+    try:
+        yield cap
+    finally:
+        cap.release()
+
+def get_frames(video_capture):
+    fps = int(video_capture.get(cv.CAP_PROP_FPS))
+    print("fps = ", fps)
+    frame_number = 0
+    while video_capture.isOpened():
+        ret, frame = video_capture.read()
+        if not ret:
+            break
+        frame_number += 1
+        if frame_number % fps != 0:
+            continue
+        frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        yield Frame(frame_number, frame, video_capture.get(cv.CAP_PROP_POS_MSEC))
+
+
+def pairwise(iterable):
+    a, b = tee(iterable)
+    next(b, None)
+    return zip(a, b)
+
+def are_similar_frame(f1, f2):
+    diff = np.count_nonzero(phash_faster(f1.image) != phash_faster(f2.image))
+    return diff <= 15
+
+def filter_redundant_frames(frames):
+    for f1, f2 in pairwise(frames):
+        if not are_similar_frame(f1, f2):
+            yield f1
+
+def ocr(frame):
+    pil_image = Image.fromarray(frame.image)
+    print("ocring")
+    text = tesserocr.image_to_text(pil_image)
+    frame.text = text
+    return frame
+
+def parallel_ocr(frames):
+    with ThreadPool(multiprocessing.cpu_count()) as pool:
+        return pool.map(ocr, frames, chunksize=multiprocessing.cpu_count())
         
 def perform_video_ocr(filename):
-    cap = cv.VideoCapture(filename)
     c = 0
-    hashes = []
-    while cap.isOpened():
-        c += 1
-        ret, frame = cap.read()
-        # if frame is read correctly ret is True
-        if not ret:
-            print("Can't receive frame (stream end?). Exiting ...")
-            break
-        if c % 120 == 0:
-            hashes.append(phash_faster(frame))
-        if c > 1000:
-            break
-    cap.release()
-    print(hashes)
+    frames = []
+    with open_cv_video(filename) as cap:
+        frames = parallel_ocr(filter_redundant_frames(get_frames(cap)))
+        for frame in frames:
+            cv.imwrite(f"local/imgs/{frame.frame_number}.jpg", frame.image)
+            with open(f"local/imgs/{frame.frame_number}.txt", "w") as f:
+                f.write(frame.text)
+            
 
 
-# from contextlib import contextmanager
-
-# @contextmanager
-# def managed_resource(*args, **kwds):
-#     # Code to acquire resource, e.g.:
-#     resource = acquire_resource(*args, **kwds)
-#     try:
-#         yield resource
-#     finally:
-#         # Code to release resource, e.g.:
-#         release_resource(resource)
 
 
 @click.command()
