@@ -10,6 +10,17 @@ from PIL import Image
 from multiprocessing.pool import ThreadPool
 import multiprocessing
 from config import error_log, info_log
+import tqdm
+
+class NoOpProgressBar:
+    def update(self):
+        pass
+    def total(self, n):
+        pass
+
+
+pbar = NoOpProgressBar()
+
 
 def phash_faster(image, hash_size=8, highfreq_factor=4):
     img_size = hash_size * highfreq_factor
@@ -38,7 +49,7 @@ def open_cv_video(filepath):
 
 def get_frames(video_capture):
     fps = int(video_capture.get(cv.CAP_PROP_FPS))
-    print("fps = ", fps)
+    pbar.total = (video_capture.get(cv.CAP_PROP_FRAME_COUNT) // fps) - 1
     frame_number = 0
     while video_capture.isOpened():
         ret, frame = video_capture.read()
@@ -64,12 +75,14 @@ def filter_redundant_frames(frames):
     for f1, f2 in pairwise(frames):
         if not are_similar_frame(f1, f2):
             yield f1
+        else:
+            pbar.update()
 
 def ocr(frame):
     pil_image = Image.fromarray(frame.image)
-    print("ocring")
     text = tesserocr.image_to_text(pil_image)
     frame.text = text
+    pbar.update()
     return frame
 
 def parallel_ocr(frames):
@@ -91,9 +104,12 @@ def perform_video_ocr(filepath, fps=None, sample_rate=1, debug_dir=""):
 @click.argument('filepath', type=click.Path(exists=True, readable=True))
 @click.option('--fps', type=int)
 @click.option('--sample_rate', type=int)
-@click.option('--debug_dir', type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True)
-def main(filepath):
-    perform_video_ocr(filepath)
+@click.option('--debug_dir', type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True))
+def main(filepath, fps, sample_rate, debug_dir):
+    global pbar
+    with tqdm.tqdm() as progress_bar:
+        pbar = progress_bar
+        perform_video_ocr(filepath)
 
 if __name__ == '__main__':
     main()
