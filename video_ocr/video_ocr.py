@@ -9,11 +9,9 @@ import tesserocr
 from PIL import Image
 from multiprocessing.pool import ThreadPool
 import multiprocessing
+from config import error_log, info_log
 
 def phash_faster(image, hash_size=8, highfreq_factor=4):
-    if hash_size < 2:
-        raise ValueError("Hash size must be greater than or equal to 2")
-
     img_size = hash_size * highfreq_factor
     image = cv.resize(image, (img_size, img_size), interpolation=cv.INTER_LINEAR)
     dct = scipy.fft.dct(scipy.fft.dct(image, axis=0), axis=1)
@@ -78,10 +76,10 @@ def parallel_ocr(frames):
     with ThreadPool(multiprocessing.cpu_count()) as pool:
         return pool.map(ocr, frames, chunksize=multiprocessing.cpu_count())
         
-def perform_video_ocr(filename):
+def perform_video_ocr(filepath, fps=None, sample_rate=1, debug_dir=""):
     c = 0
     frames = []
-    with open_cv_video(filename) as cap:
+    with open_cv_video(filepath) as cap:
         frames = parallel_ocr(filter_redundant_frames(get_frames(cap)))
         for frame in frames:
             cv.imwrite(f"local/imgs/{frame.frame_number}.jpg", frame.image)
@@ -89,11 +87,11 @@ def perform_video_ocr(filename):
                 f.write(frame.text)
             
 
-
-
-
 @click.command()
-@click.argument('filepath', type=click.Path(exists=True))
+@click.argument('filepath', type=click.Path(exists=True, readable=True))
+@click.option('--fps', type=int)
+@click.option('--sample_rate', type=int)
+@click.option('--debug_dir', type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True)
 def main(filepath):
     perform_video_ocr(filepath)
 
