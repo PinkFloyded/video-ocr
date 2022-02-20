@@ -1,30 +1,60 @@
-import click
+"""
+This module offers functionality to OCR the frames of a video, while trying to be
+computationally efficient by ignoring frames that are similar to their adjacent
+frames.
+"""
 import cv2 as cv
 import os
 
 import scipy.fft
 from contextlib import contextmanager
-import numpy as np
 from itertools import tee
+import numpy as np
 import tesserocr
 from PIL import Image
 from multiprocessing.pool import ThreadPool
 import multiprocessing
-import config
-from config import error_log, info_log, IS_CL
 import tqdm
+import click
+from functools import wraps
 
-config.IS_CL = __name__ == "__main__"
+
+IS_CL = __name__ == "__main__"
+FILEPATH_DOC = "Path to the input video file"
+SAMPLE_RATE_DOC = "Number of frames to sample per second"
+DEBUG_DIR_DOC = (
+    "If provided, writes frame and their respective texts here, for debugging"
+)
 
 
-class NoOpProgressBar:
+def _only_if_cl(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if IS_CL:
+            return f(*args, **kwargs)
+
+    return wrapper
+
+
+@_only_if_cl
+def _error_log(text, *args, **kwargs):
+    click.echo(click.style(text, fg="red"), err=True, *args, **kwargs)
+
+
+@_only_if_cl
+def _info_log(text, *args, **kwargs):
+    click.echo(text, *args, **kwargs)
+
+
+class _NoOpProgressBar:
     def update(self):
         pass
+
     def total(self, n):
         pass
 
 
-pbar = NoOpProgressBar()
+pbar = _NoOpProgressBar()
 
 
 def phash(image, hash_size=8, highfreq_factor=4):
@@ -36,12 +66,12 @@ def phash(image, hash_size=8, highfreq_factor=4):
     diff = dctlowfreq > med
     return diff
 
+
 class Frame:
     def __init__(self, frame_number, image, ts_second):
         self.frame_number = frame_number
         self.image = image
         self.ts_second = ts_second
-
 
 
 @contextmanager
@@ -52,9 +82,12 @@ def _open_cv_video(filepath):
     finally:
         cap.release()
 
+
 def _get_frames(video_capture, sample_rate):
     fps = int(video_capture.get(cv.CAP_PROP_FPS))
-    pbar.total = (video_capture.get(cv.CAP_PROP_FRAME_COUNT) // (fps // sample_rate)) - 1
+    pbar.total = (
+        video_capture.get(cv.CAP_PROP_FRAME_COUNT) // (fps // sample_rate)
+    ) - 1
     frame_number = 0
     while video_capture.isOpened():
         ret, frame = video_capture.read()
@@ -64,7 +97,7 @@ def _get_frames(video_capture, sample_rate):
         if frame_number % (fps // sample_rate) != 0:
             continue
         frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        yield Frame(frame_number, frame, frame_number//fps)
+        yield Frame(frame_number, frame, frame_number // fps)
 
 
 def _pairwise(iterable):
@@ -72,9 +105,11 @@ def _pairwise(iterable):
     next(b, None)
     return zip(a, b)
 
+
 def _are_similar_frame(f1, f2):
     diff = np.count_nonzero(phash(f1.image) != phash(f2.image))
     return diff <= 15
+
 
 def _filter_redundant_frames(frames):
     for f1, f2 in _pairwise(frames):
@@ -83,12 +118,14 @@ def _filter_redundant_frames(frames):
         else:
             pbar.update()
 
+
 def _ocr(frame):
     pil_image = Image.fromarray(frame.image)
     text = tesserocr.image_to_text(pil_image)
     frame.text = text
     pbar.update()
     return frame
+
 
 def _parallel_ocr(frames):
     with ThreadPool(multiprocessing.cpu_count()) as pool:
@@ -104,8 +141,12 @@ def _write_if_debug(frames, debug_dir):
             f.write(frame.text)
 
 
-        
-def perform_video_ocr(filepath, sample_rate=1, debug_dir=""):
+def perform_video_ocr(filepath: str, sample_rate: int = 1, debug_dir: str = ""):
+    f"""
+    :param filepath: {FILEPATH_DOC}
+    :param sample_rate: {SAMPLE_RATE_DOC}
+    :param debug_dir: {DEBUG_DIR_DOC}
+    """
     frames = []
     with _open_cv_video(filepath) as cap:
         frames = _parallel_ocr(_filter_redundant_frames(_get_frames(cap, sample_rate)))
@@ -116,7 +157,8 @@ def perform_video_ocr(filepath, sample_rate=1, debug_dir=""):
             non_empty_frames.append(frame)
     _write_if_debug(non_empty_frames, debug_dir)
     return non_empty_frames
-        
+
+
 def _get_time_stamp(seconds):
     rem_seconds = seconds
     hours = rem_seconds // 3600
@@ -128,27 +170,35 @@ def _get_time_stamp(seconds):
 
 def _display_frames(frames):
     terminal_width = os.get_terminal_size().columns
-    info_log("")
+    _info_log("")
     for frame in frames:
-        info_log("-" * terminal_width)
-        info_log(f"Timestamp = {_get_time_stamp(frame.ts_second)}")
-        info_log(frame.text)
-    info_log("-" * terminal_width)
+        _info_log("-" * terminal_width)
+        _info_log(f"Timestamp = {_get_time_stamp(frame.ts_second)}")
+        _info_log(frame.text)
+    _info_log("-" * terminal_width)
 
 
-            
 @click.command()
-@click.argument('filepath', type=click.Path(exists=True, readable=True))
-@click.option('--sample_rate', type=int)
-@click.option('--debug_dir', type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True))
+@click.argument(
+    "filepath", type=click.Path(exists=True, readable=True, help=FILEPATH_DOC)
+)
+@click.option("--sample_rate", type=int, help=SAMPLE_RATE_DOC)
+@click.option(
+    "--debug_dir",
+    type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True),
+    help=DEBUG_DIR_DOC,
+)
 def main(filepath, sample_rate, debug_dir):
     global pbar
     with tqdm.tqdm() as progress_bar:
         pbar = progress_bar
         sample_rate = sample_rate if sample_rate else 1
         debug_dir = debug_dir if debug_dir else ""
-        frames = perform_video_ocr(filepath, sample_rate=sample_rate, debug_dir=debug_dir)
+        frames = perform_video_ocr(
+            filepath, sample_rate=sample_rate, debug_dir=debug_dir
+        )
     _display_frames(frames)
 
-if config.IS_CL:
+
+if IS_CL:
     main()
