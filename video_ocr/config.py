@@ -1,12 +1,12 @@
 import click
 from functools import wraps
-_IS_CL = __name__ == "__main__"
 
+IS_CL = False
 
 def only_if_cl(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if _IS_CL:
+        if IS_CL:
             return f(*args, **kwargs)
     return wrapper
 
