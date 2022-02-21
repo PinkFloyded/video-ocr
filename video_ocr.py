@@ -19,7 +19,7 @@ import click
 from functools import wraps
 
 
-IS_CL = __name__ == "__main__"
+IS_CL = False
 FILEPATH_DOC = "Path to the input video file"
 SAMPLE_RATE_DOC = "Number of frames to sample per second"
 DEBUG_DIR_DOC = (
@@ -30,6 +30,7 @@ DEBUG_DIR_DOC = (
 def _only_if_cl(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
+        print(IS_CL)
         if IS_CL:
             return f(*args, **kwargs)
 
@@ -182,18 +183,18 @@ def _display_frames(frames):
 @click.argument(
     "filepath", type=click.Path(exists=True, readable=True,)
 )
-@click.option("--sample_rate", type=int, help=SAMPLE_RATE_DOC)
+@click.option("--sample_rate", type=int, help=SAMPLE_RATE_DOC, default=1)
 @click.option(
     "--debug_dir",
     type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True),
-    help=DEBUG_DIR_DOC,
+    help=DEBUG_DIR_DOC 
 )
 def main(filepath, sample_rate, debug_dir):
+    global IS_CL
     global pbar
+    IS_CL = True
     with tqdm.tqdm() as progress_bar:
         pbar = progress_bar
-        sample_rate = sample_rate if sample_rate else 1
-        debug_dir = debug_dir if debug_dir else ""
         frames = perform_video_ocr(
             filepath, sample_rate=sample_rate, debug_dir=debug_dir
         )
