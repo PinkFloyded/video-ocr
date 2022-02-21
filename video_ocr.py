@@ -180,7 +180,7 @@ def _display_frames(frames):
 
 @click.command()
 @click.argument(
-    "filepath", type=click.Path(exists=True, readable=True, help=FILEPATH_DOC)
+    "filepath", type=click.Path(exists=True, readable=True,)
 )
 @click.option("--sample_rate", type=int, help=SAMPLE_RATE_DOC)
 @click.option(
