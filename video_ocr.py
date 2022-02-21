@@ -30,7 +30,6 @@ DEBUG_DIR_DOC = (
 def _only_if_cl(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        print(IS_CL)
         if IS_CL:
             return f(*args, **kwargs)
 
