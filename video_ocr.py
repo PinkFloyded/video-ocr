@@ -181,13 +181,17 @@ def _display_frames(frames):
 
 @click.command()
 @click.argument(
-    "filepath", type=click.Path(exists=True, readable=True,)
+    "filepath",
+    type=click.Path(
+        exists=True,
+        readable=True,
+    ),
 )
 @click.option("--sample_rate", type=int, help=SAMPLE_RATE_DOC, default=1)
 @click.option(
     "--debug_dir",
     type=click.Path(exists=True, writable=True, file_okay=False, dir_okay=True),
-    help=DEBUG_DIR_DOC 
+    help=DEBUG_DIR_DOC,
 )
 def main(filepath, sample_rate, debug_dir):
     global IS_CL
